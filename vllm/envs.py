@@ -236,6 +236,7 @@ if TYPE_CHECKING:
     VLLM_V1_SPANS_DEBUG: bool = False
     VLLM_V1_SPANS_TOKEN_PLUS: int = -1
     VLLM_V1_SPANS_TOKEN_CROSS: int = -1
+    VLLM_USE_V2_MODEL_RUNNER: bool = False
 
 
 def get_default_cache_root():
@@ -1527,6 +1528,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_COMPILE_CACHE_SAVE_FORMAT": env_with_choices(
         "VLLM_COMPILE_CACHE_SAVE_FORMAT", "binary", ["binary", "unpacked"]
     ),
+<<<<<<< HEAD
     # whether to enable block-attention (span detection, fan-in, repositioning)
     "VLLM_V1_SPANS_ENABLED": lambda: os.environ.get("VLLM_V1_SPANS_ENABLED", "False")
     == "True",
@@ -1543,6 +1545,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # span which needs to depend on all previous tokens
     "VLLM_V1_SPANS_TOKEN_CROSS": lambda: int(
         os.environ.get("VLLM_V1_SPANS_TOKEN_CROSS", "-1")
+=======
+    # Flag to enable v2 model runner.
+    "VLLM_USE_V2_MODEL_RUNNER": lambda: bool(
+        int(os.getenv("VLLM_USE_V2_MODEL_RUNNER", "0"))
+>>>>>>> 30b44a159 (GPU Model Runner V2 (#25266))
     ),
 }
 
