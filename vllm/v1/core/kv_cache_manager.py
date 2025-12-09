@@ -203,6 +203,7 @@ class KVCacheManager:
                 request.block_hashes, max_cache_hit_length
             )
         )
+        print(f"vLLMCacheHitRate {100*(num_new_computed_tokens/(len(request.block_hashes)*self.block_size)):.2f}% computed={num_new_computed_tokens} requested={len(request.block_hashes)*self.block_size}", flush=True)
 
         if self.log_stats:
             assert self.prefix_cache_stats is not None
