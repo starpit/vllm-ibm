@@ -2,26 +2,25 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import ast
-import hashlib
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import Field, SkipValidation, model_validator
 from pydantic.dataclasses import dataclass
 from typing_extensions import Self
 
+from vllm.config.model import ModelConfig
 from vllm.config.parallel import ParallelConfig
 from vllm.config.utils import config
 from vllm.logger import init_logger
+from vllm.utils.hashing import safe_hash
 from vllm.utils.import_utils import LazyLoader, has_arctic_inference
 
 if TYPE_CHECKING:
     from transformers import PretrainedConfig
 
     import vllm.model_executor.layers.quantization as me_quant
-    from vllm.config import ModelConfig
 else:
     PretrainedConfig = Any
-    ModelConfig = Any
 
     me_quant = LazyLoader(
         "model_executor", globals(), "vllm.model_executor.layers.quantization"
@@ -34,6 +33,7 @@ MTPModelTypes = Literal[
     "mimo_mtp",
     "glm4_moe_mtp",
     "ernie_mtp",
+    "exaone_moe_mtp",
     "qwen3_next_mtp",
     "longcat_flash_mtp",
     "mtp",
@@ -163,11 +163,12 @@ class SpeculativeConfig:
         # Eagle3 affects the computation graph because it returns intermediate
         # hidden states in addition to the final hidden state.
         factors.append(self.method == "eagle3")
-        hash_str = hashlib.md5(str(factors).encode(), usedforsecurity=False).hexdigest()
+        hash_str = safe_hash(str(factors).encode(), usedforsecurity=False).hexdigest()
         return hash_str
 
     @staticmethod
     def hf_config_override(hf_config: PretrainedConfig) -> PretrainedConfig:
+        initial_architecture = hf_config.architectures[0]
         if hf_config.model_type in ("deepseek_v3", "deepseek_v32"):
             hf_config.model_type = "deepseek_mtp"
         if hf_config.model_type == "deepseek_mtp":
@@ -199,7 +200,6 @@ class SpeculativeConfig:
             n_predict = getattr(hf_config, "num_nextn_predict_layers", None)
             hf_config.update(
                 {
-                    "num_hidden_layers": 0,
                     "n_predict": n_predict,
                     "architectures": ["Glm4MoeMTPModel"],
                 }
@@ -220,12 +220,24 @@ class SpeculativeConfig:
             hf_config.update(
                 {"n_predict": n_predict, "architectures": ["Qwen3NextMTP"]}
             )
+
+        if hf_config.model_type == "exaone_moe":
+            hf_config.model_type = "exaone_moe_mtp"
+        if hf_config.model_type == "exaone_moe_mtp":
+            n_predict = getattr(hf_config, "num_nextn_predict_layers", None)
+            hf_config.update(
+                {"n_predict": n_predict, "architectures": ["ExaoneMoeMTP"]}
+            )
+
         if hf_config.model_type == "longcat_flash":
             hf_config.model_type = "longcat_flash_mtp"
             n_predict = getattr(hf_config, "num_nextn_predict_layers", 1)
             hf_config.update(
                 {"n_predict": n_predict, "architectures": ["LongCatFlashMTPModel"]}
             )
+
+        if initial_architecture == "MistralLarge3ForCausalLM":
+            hf_config.update({"architectures": ["EagleMistralLarge3ForCausalLM"]})
 
         return hf_config
 
@@ -316,10 +328,6 @@ class SpeculativeConfig:
             self.prompt_lookup_min = 0
 
             if self.model is not None:
-                # TODO: Move this import to the top once `ModelConfig`
-                # lives in `vllm.config.model`.
-                from vllm.config import ModelConfig
-
                 self.draft_model_config = ModelConfig(
                     model=self.model,
                     runner="draft",
@@ -338,6 +346,7 @@ class SpeculativeConfig:
                     enforce_eager=self.target_model_config.enforce_eager,
                     max_logprobs=self.target_model_config.max_logprobs,
                     hf_overrides=SpeculativeConfig.hf_config_override,
+                    config_format=self.target_model_config.config_format,
                 )
 
                 # Automatically detect the method
@@ -401,6 +410,9 @@ class SpeculativeConfig:
                             model_type="eagle",
                         )
                         self.draft_model_config.hf_config = eagle_config
+                        self.draft_model_config.model_arch_config = (
+                            self.draft_model_config.get_model_arch_config()
+                        )
 
                 if self.num_speculative_tokens is not None and hasattr(
                     self.draft_model_config.hf_config, "num_lookahead_tokens"
